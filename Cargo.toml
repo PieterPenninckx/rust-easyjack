@@ -1,0 +1,8 @@
+[package]
+name = "synth"
+version = "0.1.0"
+authors = ["David Zmick <dpzmick@gmail.com>"]
+
+[dependencies]
+jack-sys = "0.1.0"
+libc = "0.2"
