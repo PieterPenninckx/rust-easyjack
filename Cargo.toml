@@ -1,9 +1,12 @@
 [package]
-name = "synth"
-version = "0.1.0"
+name = "easyjack"
+version = "0.0.1"
 authors = ["David Zmick <dpzmick@gmail.com>"]
+description = "Easym rusty, bindings for the jack api"
+license = "MIT"
 
 [dependencies]
+bitflags = "0.7"
 chan-signal = "0.1.6"
 jack-sys = "0.1.0"
 libc = "0.2"
