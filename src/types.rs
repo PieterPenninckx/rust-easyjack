@@ -107,6 +107,8 @@ bitflags! {
 }
 }
 
+/// This module contains constants for various options which can be used in various parts of the
+/// jack code and a bitflags! generated struct to represent them
 pub mod options {
 use jack_sys;
 

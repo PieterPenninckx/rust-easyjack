@@ -12,14 +12,18 @@ pub struct PortHandle {
     c_port: *mut jack_sys::jack_port_t
 }
 
-// jack promises that operations on ports are thread safe
+/// All JACK operations on ports are thread safe
 unsafe impl Sync for PortHandle { }
 
 impl PortHandle {
+    /// Creates a new port handle from C JACK library pointer.
+    /// Should not be used outside of the `easyjack` code.
+    #[doc(hidden)]
     pub fn new(c_port: *mut jack_sys::jack_port_t) -> Self {
         PortHandle { c_port: c_port }
     }
 
+    /// Gets the port's assigned full name (including the client name and the colon)
     pub fn get_name(&self) -> &str {
         unsafe {
             let raw = self.c_port;
@@ -28,12 +32,24 @@ impl PortHandle {
         }
     }
 
+    // TODO get_short_name
+
+    /// Get a readable buffer for the port. This is valid for any type of port, but probably
+    /// doesn't make sense for an output port.
+    ///
+    /// This is for use in the `process` callback
     pub fn get_read_buffer(&self, nframes: jack_sys::jack_nframes_t)
         -> &[jack_sys::jack_default_audio_sample_t]
     {
         self.get_write_buffer(nframes)
     }
 
+    /// Get a writable buffer for the port. This is only valid for an output port.
+    /// If the port is not an output port this will `panic!`
+    ///
+    /// TODO maybe be more clever with the type system to prevent calls on output ports
+    ///
+    /// This is for use in the `process` callback
     pub fn get_write_buffer(&self, nframes: jack_sys::jack_nframes_t)
         -> &mut [jack_sys::jack_default_audio_sample_t]
     {
@@ -44,6 +60,9 @@ impl PortHandle {
         }
     }
 
+    /// Gets the raw C JACK pointer
+    /// Not to be used outside of the `easyjack` code
+    #[doc(hidden)]
     pub unsafe fn get_raw(&self) -> *mut jack_sys::jack_port_t {
         self.c_port
     }
