@@ -1,7 +1,13 @@
-extern crate chan_signal;
-extern crate jack;
+extern crate easyjack as jack;
+extern crate nix;
 
-use chan_signal::Signal;
+use nix::sys::signal;
+use std::sync::atomic;
+use std::thread;
+use std::time::Duration;
+
+// signals are unpleasant (check comments in simple_client example)
+static RUNNING: atomic::AtomicBool = atomic::ATOMIC_BOOL_INIT;
 
 struct Connector {
     inputs: Vec<jack::PortHandle>,
@@ -19,7 +25,7 @@ impl Connector {
     }
 }
 
-impl jack::CallbackHandler for Connector {
+impl jack::ProcessHandler for Connector {
     fn process(&mut self, nframes: jack::NumFrames) -> i32 {
         // for each of our inputs and outputs, copy the input buffer into the output buffer
         for index in 0..self.inputs.len() {
@@ -33,9 +39,21 @@ impl jack::CallbackHandler for Connector {
     }
 }
 
+extern "C" fn handle_sigint(_: i32) {
+    RUNNING.store(false, atomic::Ordering::SeqCst);
+}
+
 fn main() {
-    // set up signal handlers using chan_signal
-    let signal = chan_signal::notify(&[Signal::INT]);
+    // register a signal handler (see comments at top of file)
+    let action = signal::SigAction::new(
+        signal::SigHandler::Handler(handle_sigint),
+        signal::SaFlags::empty(),
+        signal::SigSet::empty());
+
+    unsafe { signal::sigaction(signal::Signal::SIGINT, &action) }.unwrap();
+
+    // set our global atomic to true
+    RUNNING.store(true, atomic::Ordering::SeqCst);
 
     let mut jack_client = jack::Client::open("testclient", jack::options::NO_START_SERVER).unwrap();
     println!("client created named: {}", jack_client.get_name());
@@ -47,18 +65,21 @@ fn main() {
     let output2 = jack_client.register_output_audio_port("output2").unwrap();
 
     let handler = Connector::new(vec![input1, input2], vec![output1, output2]);
-    jack_client.set_handler(handler);
+    jack_client.set_process_handler(handler).unwrap();
 
     // start everything up
     jack_client.activate().unwrap();
 
     // wait to get a SIGINT
     // jack will do all of its magic in other threads
-    signal.recv().unwrap();
+    while RUNNING.load(atomic::Ordering::SeqCst) {
+        thread::sleep(Duration::from_millis(1000));
+    }
 
     // now we can clean everything up
     // the library doesn't handle this for us because it would be rather confusing, especially
     // given how the underlying jack api actually works
+    println!("tearing down");
 
     // closing the client unregisters all of the ports
     // unregistering the ports after the client is closed is an error

@@ -1,15 +1,26 @@
 use jack_sys;
-pub type PortType = &'static str;
+
+pub type PortType  = &'static str;
+pub type PortId    = jack_sys::jack_port_id_t;
 pub type NumFrames = jack_sys::jack_nframes_t;
+pub type UUID      = jack_sys::jack_uuid_t;
+
+pub type DefaultAudioSample = jack_sys::jack_default_audio_sample_t;
+
+/// Used by the PortConnectHandler callback function
+pub enum PortConnectStatus {
+    PortsConnected,
+    PortsDisconnected,
+}
 
 /// This module contains constants and a bitflags! generated struct mapping to the jack port flags
 /// bitset for specifying options on jack ports
 ///
 /// TODO provide good example here
 pub mod port_flags {
-use jack_sys;
+   use jack_sys;
 
-bitflags! {
+    bitflags! {
     pub flags PortFlags: u32 {
         /// if PortIsInput is set, then the port can receive data.
         const PORT_IS_INPUT = jack_sys::JackPortIsInput,
@@ -56,9 +67,9 @@ pub mod port_type {
 /// This module contains a bitflags! generated struct for jack error codes, and some constants
 /// defining their default values
 pub mod status {
-use jack_sys;
+    use jack_sys;
 
-bitflags! {
+    bitflags! {
     pub flags Status: u32 {
         /// overall operation failed
         const FAILURE = jack_sys::JackFailure,
@@ -110,9 +121,9 @@ bitflags! {
 /// This module contains constants for various options which can be used in various parts of the
 /// jack code and a bitflags! generated struct to represent them
 pub mod options {
-use jack_sys;
+    use jack_sys;
 
-bitflags! {
+    bitflags! {
     pub flags Options: u32 {
         /// Null value to use when no option bits are needed.
         const NULL_OPTIONS = jack_sys::JackNullOption,
@@ -126,11 +137,14 @@ bitflags! {
         /// one, if needed.
         const USE_EXACT_NAME = jack_sys::JackUseExactName,
 
-        // TODO these flags are disabled because the client interface doesn't support them
-        // const SERVER_NAME = jack_sys::JackServerName,
+        // these flags are hidden because the client interface supports them in a different way
+        #[doc(hidden)]
+        const SERVER_NAME = jack_sys::JackServerName,
+
+        // TODO figure these out
         // const LOAD_NAME = jack_sys::JackLoadName,
         // const LOAD_INIT = jack_sys::JackLoadInit,
-        // const SESSION_ID = jack_sys::JackSessionID, // TODO what is this?
+        // const SESSION_ID = jack_sys::JackSessionID,
     }
 }
 }
