@@ -9,6 +9,9 @@ use std::process::exit;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 
+// bring the trait for all common port operations into scope
+use jack::Port;
+
 enum Mode {
     Connect(String, String),
     Disconnect(String, String),

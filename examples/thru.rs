@@ -9,13 +9,16 @@ use std::time::Duration;
 // signals are unpleasant (check comments in simple_client example)
 static RUNNING: atomic::AtomicBool = atomic::ATOMIC_BOOL_INIT;
 
+type InputPort  = jack::InputPortHandle<jack::DefaultAudioSample>;
+type OutputPort = jack::OutputPortHandle<jack::DefaultAudioSample>;
+
 struct Connector {
-    inputs: Vec<jack::PortHandle>,
-    outputs: Vec<jack::PortHandle>
+    inputs: Vec<InputPort>,
+    outputs: Vec<OutputPort>
 }
 
 impl Connector {
-    pub fn new(inputs: Vec<jack::PortHandle>, outputs: Vec<jack::PortHandle>) -> Self {
+    pub fn new(inputs: Vec<InputPort>, outputs: Vec<OutputPort>) -> Self {
         assert_eq!(inputs.len(), outputs.len());
 
         Connector {

@@ -98,27 +98,28 @@ impl<'a> Client<'a> {
         }
     }
 
-    /// Create a new port for this client. Ports are used to move data in and
-    /// out of the client (audio data, midi data, etc). Ports may be connected
-    /// to other ports in various ways.
+    /// Create a new port for this client. Ports are used to move data in and out of the client
+    /// (audio data, midi data, etc). Ports may be connected to other ports in various ways.
     ///
-    /// Each port has a short name which must be unique among all the ports
-    /// owned by the client. The port's full name contains the name of the
-    /// client, followed by a colon (:), followed by the port's short name.
+    /// Each port has a short name which must be unique among all the ports owned by the client.
+    /// The port's full name contains the name of the client, followed by a colon (:), followed by
+    /// the port's short name.
     ///
-    /// All ports have a type. The `port_type` module contains port types which
-    /// may be used.
+    /// All ports have a type. The `port_type` module contains port types which may be used.
     ///
-    /// You may also specify a number of flags from the `port_flags` module
-    /// which control the behavior of the created port (input vs output, etc)
+    /// You may also specify a number of flags from the `port_flags` module which control the
+    /// behavior of the created port (input vs output, etc)
+    ///
+    /// This function has to figure out what kind of port to return based on the flags provided.
     ///
     /// TODO something about buffer size I haven't figured out yet
     /// TODO port_name_size()
-    pub fn register_port(&mut self,
-                         name: &str,
-                         ptype: PortType,
-                         opts: port_flags::PortFlags)
-                         -> Result<PortHandle, status::Status>
+    fn register_port(
+        &mut self,
+        name: &str,
+        ptype: PortType,
+        opts: port_flags::PortFlags)
+        -> Result<UnknownPortHandle, status::Status>
     {
         let cstr = CString::new(name).unwrap();
         let typestr = CString::new(ptype).unwrap();
@@ -136,36 +137,39 @@ impl<'a> Client<'a> {
             // no error code is returned from jack here
             Err(status::FAILURE)
         } else {
-            let port = PortHandle::new(port);
-            Ok(port)
+            Ok(UnknownPortHandle::new(port))
         }
     }
 
     /// Helper function which registers an input audio port with a given name.
     pub fn register_input_audio_port(&mut self, name: &str)
-                                     -> Result<PortHandle, status::Status>
+            -> Result<InputPortHandle<DefaultAudioSample>, status::Status>
     {
-        self.register_port(
+        let p = self.register_port(
             name,
             port_type::DEFAULT_AUDIO_TYPE,
-            port_flags::PORT_IS_INPUT)
+            port_flags::PORT_IS_INPUT);
+
+        p.map(|p| unsafe { p.force_as_input::<DefaultAudioSample>() })
     }
 
     /// Helper function which registers an output audio port with a given name.
     pub fn register_output_audio_port(&mut self, name: &str)
-                                      -> Result<PortHandle, status::Status>
+            -> Result<OutputPortHandle<DefaultAudioSample>, status::Status>
     {
-        self.register_port(
+        let p = self.register_port(
             name,
             port_type::DEFAULT_AUDIO_TYPE,
-            port_flags::PORT_IS_OUTPUT)
+            port_flags::PORT_IS_OUTPUT);
+
+        p.map(|p| unsafe { p.force_as_output::<DefaultAudioSample>() })
     }
 
     /// Removes the port from the client and invalidates the port and all
-    /// PortHandles referencing the port.
+    /// Handles relating to the port.
     ///
     /// The server disconnects everything that was previously connected to the port.
-    pub fn unregister_port(&mut self, port: PortHandle) -> Result<(), status::Status> {
+    pub fn unregister_port<T: Port>(&mut self, port: T) -> Result<(), status::Status> {
         let ret = unsafe { jack_sys::jack_port_unregister(self.c_client, port.get_raw()) };
 
         if ret == 0 {
@@ -176,24 +180,24 @@ impl<'a> Client<'a> {
         }
     }
 
-    pub fn get_port_by_name(&self, name: &str) -> Option<PortHandle> {
+    pub fn get_port_by_name(&self, name: &str) -> Option<UnknownPortHandle> {
         let cstr = CString::new(name).unwrap();
         let ptr = unsafe { jack_sys::jack_port_by_name(self.c_client, cstr.as_ptr()) };
 
         if ptr.is_null() {
             None
         } else {
-            Some(PortHandle::new(ptr))
+            Some(UnknownPortHandle::new(ptr))
         }
     }
 
-    pub fn get_port_by_id(&self, id: PortId) -> Option<PortHandle> {
+    pub fn get_port_by_id(&self, id: PortId) -> Option<UnknownPortHandle> {
         let ptr = unsafe { jack_sys::jack_port_by_id(self.c_client, id) };
 
         if ptr.is_null() {
             None
         } else {
-            Some(PortHandle::new(ptr))
+            Some(UnknownPortHandle::new(ptr))
         }
     }
 
@@ -221,9 +225,7 @@ impl<'a> Client<'a> {
     /// Attempts to disconnect the ports with the given names
     /// Note that this method calls directly into the jack api. It does not
     /// perform lookups for the names before making the call
-    pub fn disconnect_ports(&mut self, port1: &str, port2: &str)
-                            -> Result<(), status::Status>
-    {
+    pub fn disconnect_ports(&mut self, port1: &str, port2: &str) -> Result<(), status::Status> {
         let res = unsafe {
             jack_sys::jack_disconnect(
                 self.c_client,
@@ -242,9 +244,7 @@ impl<'a> Client<'a> {
     /// The client takes ownership of the handler, so be sure to set up any
     /// messaging queues before passing the handler off to the client
     /// See the docs for the `ProcessHandler` struct for more details
-    pub fn set_process_handler<T: ProcessHandler + 'a>(
-        &mut self,
-        handler: T)
+    pub fn set_process_handler<T: ProcessHandler + 'a>(&mut self, handler: T)
         -> Result<(), status::Status>
     {
         // a function which will do some setup then call the client's handler
@@ -292,9 +292,7 @@ impl<'a> Client<'a> {
     /// See the docs for the `PortConnectHandler` struct for more details
     /// TODO explain why I've eschewed reliance on jack's immutability and am
     /// forcing the use of queues and whatnot
-    pub fn set_port_connection_handler<T: PortConnectHandler + 'a>(
-        &mut self,
-        handler: T)
+    pub fn set_port_connection_handler<T: PortConnectHandler + 'a>(&mut self, handler: T)
         -> Result<(), status::Status>
     {
         // see set_process_handler for details on the implementation

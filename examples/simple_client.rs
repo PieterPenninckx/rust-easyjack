@@ -38,8 +38,8 @@ struct AudioHandler {
 
     /// handles for the ports we are reading and writing to.
     /// Remember, port handles can become invalid if you are careless with them
-    right_output: jack::PortHandle,
-    left_output: jack::PortHandle,
+    right_output: jack::OutputPortHandle<jack::DefaultAudioSample>,
+    left_output: jack::OutputPortHandle<jack::DefaultAudioSample>,
 
     /// incoming changes
     /// these are copied into the channel, then copied out of the channel.
@@ -51,8 +51,8 @@ impl AudioHandler {
     /// constructs a new audio handler
     fn new(
         init_samples: [jack::DefaultAudioSample; N],
-        right: jack::PortHandle,
-        left: jack::PortHandle,
+        right: jack::OutputPortHandle<jack::DefaultAudioSample>,
+        left: jack::OutputPortHandle<jack::DefaultAudioSample>,
         incoming: Receiver<[jack::DefaultAudioSample; N]>) -> Self
     {
         AudioHandler {
