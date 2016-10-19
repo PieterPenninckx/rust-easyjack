@@ -4,15 +4,18 @@ use std::ffi::CStr;
 use std::marker::PhantomData;
 use std::slice;
 use std::str::FromStr;
+use num;
 
+use midi::*;
 use types::*;
+use callbackhandler::*;
 
 type Jackptr = *mut jack_sys::jack_port_t;
 
 /// Ports are the means by which jack clients communicate with each other.
 ///
 /// The port wrappers in `easyjack` have slightly confusing type definitions due to the behavior of
-/// the underlying JACK C API
+/// the underlying JACK C API. The interface they expose is also much more "C" like than rust like.
 ///
 /// Each of the Port structs defined implement the `Port` trait, which should be sufficient for use
 /// in many situations, however, occasionally, we may want to access pieces of data which are only
@@ -37,6 +40,12 @@ type Jackptr = *mut jack_sys::jack_port_t;
 /// Using a port after it has become invalid is undefined behavior and may cause all sorts of
 /// strange things to occur.
 pub trait Port {
+    #[doc(hidden)]
+    fn new(c_port: Jackptr) -> Self;
+
+    #[doc(hidden)]
+    unsafe fn get_raw(&self) -> Jackptr;
+
     /// Gets the port's assigned full name (including the client name and the colon)
     fn get_name(&self) -> String {
         unsafe {
@@ -55,11 +64,6 @@ pub trait Port {
         let rawbits = unsafe { jack_sys::jack_port_flags(self.get_raw()) };
         port_flags::PortFlags::from_bits(rawbits as u32).unwrap()
     }
-
-    /// Gets the raw C JACK pointer
-    /// Not to be used outside of the `easyjack` code
-    #[doc(hidden)]
-    unsafe fn get_raw(&self) -> Jackptr;
 }
 
 pub struct UnknownPortHandle {
@@ -67,11 +71,6 @@ pub struct UnknownPortHandle {
 }
 
 impl UnknownPortHandle {
-    #[doc(hidden)]
-    pub fn new(c_port: Jackptr) -> Self {
-        UnknownPortHandle { c_port: c_port }
-    }
-
     /// Attempts to coerce the port into an input port
     /// This function will test the port's flags to ensure that it is actually an input port
     pub fn as_input<SampleType>(self) -> Option<InputPortHandle<SampleType>> {
@@ -115,39 +114,59 @@ impl UnknownPortHandle {
 
 impl Port for UnknownPortHandle {
     #[doc(hidden)]
+    fn new(c_port: Jackptr) -> Self {
+        UnknownPortHandle { c_port: c_port }
+    }
+
+    #[doc(hidden)]
     unsafe fn get_raw(&self) -> Jackptr { self.c_port }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct InputPortHandle<SampleType> {
     c_port: Jackptr,
-    phantom: PhantomData<SampleType>
+    phantom: PhantomData<SampleType>,
 }
 
 impl<SampleType> Port for InputPortHandle<SampleType> {
     #[doc(hidden)]
-    unsafe fn get_raw(&self) -> Jackptr { self.c_port }
-}
-
-impl<SampleType> InputPortHandle<SampleType> {
-    #[doc(hidden)]
-    pub fn new(c_port: Jackptr) -> Self {
+    fn new(c_port: Jackptr) -> Self {
         InputPortHandle {
             c_port: c_port,
             phantom: PhantomData,
         }
     }
 
+    #[doc(hidden)]
+    unsafe fn get_raw(&self) -> Jackptr { self.c_port }
+}
+
+impl<SampleType: num::Num> InputPortHandle<SampleType> {
     /// Get the input port's readable buffer
-    pub fn get_read_buffer(
-        &self,
-        nframes: NumFrames)
-        -> &[SampleType]
+    pub fn get_read_buffer<'a>(&self, nframes: NumFrames, _ctx: &'a CallbackContext)
+        -> &'a [SampleType]
     {
         unsafe {
             let ptr = jack_sys::jack_port_get_buffer(self.c_port, nframes);
             let ptr = ptr as *mut SampleType;
             slice::from_raw_parts_mut(ptr, nframes as usize)
+        }
+    }
+}
+
+impl InputPortHandle<MidiEvent> {
+    /// returns a vector of midi events
+    /// Note that this returns by value (we are not returning by reference, like we have in the
+    /// other `get_read_buffer` methods)
+    pub fn get_read_buffer<'a>(&self, nframes:NumFrames, _ctx: &'a CallbackContext)
+        -> MidiEventBuf<'a>
+    {
+        // getting a buffer of midi events is much harder than getting a buffer of audio events,
+        // but it's okay, we can make it work!
+        unsafe {
+            // first, get the raw event port from jack
+            let ptr = jack_sys::jack_port_get_buffer(self.c_port, nframes);
+            MidiEventBuf::new(ptr)
         }
     }
 }
@@ -160,23 +179,21 @@ pub struct OutputPortHandle<SampleType> {
 
 impl<SampleType> Port for OutputPortHandle<SampleType> {
     #[doc(hidden)]
-    unsafe fn get_raw(&self) -> Jackptr { self.c_port }
-}
-
-impl<SampleType> OutputPortHandle<SampleType> {
-    #[doc(hidden)]
-    pub fn new(c_port: Jackptr) -> Self {
+    fn new(c_port: Jackptr) -> Self {
         OutputPortHandle {
             c_port: c_port,
             phantom: PhantomData,
         }
     }
 
+    #[doc(hidden)]
+    unsafe fn get_raw(&self) -> Jackptr { self.c_port }
+}
+
+impl<SampleType> OutputPortHandle<SampleType> {
     /// Get the input port's readable buffer
-    pub fn get_write_buffer(
-        &self,
-        nframes: NumFrames)
-        -> &mut [SampleType]
+    pub fn get_write_buffer<'a>(&self, nframes: NumFrames, _ctx: &'a CallbackContext)
+        -> &'a mut [SampleType]
     {
         unsafe {
             let ptr = jack_sys::jack_port_get_buffer(self.c_port, nframes);

@@ -4,18 +4,22 @@ use libc;
 use std::ffi::{CString, CStr};
 
 use callbackhandler::*;
+use midi::*;
 use port::*;
 use types::*;
 
 /// A jack client connected to a jack server
 /// TODO example
+/// TODO multi_handler_registration - we need a way to register one struct as a handler for
+/// multiple callbacks, else this will become a giant mess very quickly
 pub struct Client<'a> {
     c_client: *mut jack_sys::jack_client_t,
 
     // store the handlers in a box so that we can store a trait object + take ownership
     // I do not like boxing everything up because it causes unnecessary heap allocation :(
-    process_handler: Option<Box<ProcessHandler + 'a>>,
+    process_handler:   Option<Box<ProcessHandler + 'a>>,
     port_conn_handler: Option<Box<PortConnectHandler + 'a>>,
+    srate_handler:     Option<Box<SampleRateHandler + 'a>>,
 }
 
 impl<'a> Client<'a> {
@@ -42,9 +46,10 @@ impl<'a> Client<'a> {
         } else {
             // TODO check status anyway
             Ok(Client {
-                c_client: cl,
-                process_handler: None,
+                c_client:          cl,
+                process_handler:   None,
                 port_conn_handler: None,
+                srate_handler:     None
             })
         }
     }
@@ -77,9 +82,10 @@ impl<'a> Client<'a> {
         } else {
             // TODO check status anyway
             Ok(Client {
-                c_client: cl,
-                process_handler: None,
+                c_client:          cl,
+                process_handler:   None,
                 port_conn_handler: None,
+                srate_handler:     None
             })
         }
 
@@ -151,6 +157,18 @@ impl<'a> Client<'a> {
             port_flags::PORT_IS_INPUT);
 
         p.map(|p| unsafe { p.force_as_input::<DefaultAudioSample>() })
+    }
+
+    /// Helper function which registers an input midi port with a given name.
+    pub fn register_input_midi_port(&mut self, name: &str)
+            -> Result<InputPortHandle<MidiEvent>, status::Status>
+    {
+        let p = self.register_port(
+            name,
+            port_type::DEFAULT_MIDI_TYPE,
+            port_flags::PORT_IS_INPUT);
+
+        p.map(|p| unsafe { p.force_as_input::<MidiEvent>() })
     }
 
     /// Helper function which registers an output audio port with a given name.
@@ -257,7 +275,8 @@ impl<'a> Client<'a> {
             -> libc::c_int
         {
             let this = args as *mut T;
-            unsafe { (*this).process(nframes) }
+            let ctx = CallbackContext::new();
+            unsafe { (*this).process(&ctx, nframes) }
         }
 
         // create a box for this handler
@@ -282,6 +301,44 @@ impl<'a> Client<'a> {
             // create a box from the raw pointer. this does not allocate more memory
             let b = unsafe { Box::from_raw(ptr) };
             self.process_handler = Some(b);
+            Ok(())
+        }
+    }
+
+    /// Set the client's sample rate change handler.
+    pub fn set_sample_rate_handler<T: SampleRateHandler+ 'a>(&mut self, handler: T)
+        -> Result<(), status::Status>
+    {
+        // see set_process_handler for details on the implementation
+        extern "C" fn callback<T: SampleRateHandler>(
+            srate: NumFrames,
+            args: *mut libc::c_void) -> i32
+        {
+            let this = args as *mut T;
+
+            unsafe { (*this).sample_rate_changed(srate) }
+        }
+
+        // create a box for this handler
+        // this will allocate memory and move the object to the allocated memory on the heap
+        let b = Box::new(handler);
+
+        // get the pointer, this consumes the box, but does not move the
+        // resulting memory anywhere
+        let ptr = Box::into_raw(b);
+
+        let ret = unsafe {
+            let ptr = ptr as *mut libc::c_void;
+            jack_sys::jack_set_sample_rate_callback(self.c_client, Some(callback::<T>), ptr)
+        };
+
+        if ret != 0 {
+            // again, no error code provided
+            Err(status::FAILURE)
+        } else {
+            // create a box from the raw pointer. this does not allocate more memory
+            let b = unsafe { Box::from_raw(ptr) };
+            self.srate_handler = Some(b);
             Ok(())
         }
     }

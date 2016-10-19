@@ -14,7 +14,7 @@ type OutputPort = jack::OutputPortHandle<jack::DefaultAudioSample>;
 
 struct Connector {
     inputs: Vec<InputPort>,
-    outputs: Vec<OutputPort>
+    outputs: Vec<OutputPort>,
 }
 
 impl Connector {
@@ -29,13 +29,14 @@ impl Connector {
 }
 
 impl jack::ProcessHandler for Connector {
-    fn process(&mut self, nframes: jack::NumFrames) -> i32 {
+    fn process(&mut self, ctx: &jack::CallbackContext, nframes: jack::NumFrames) -> i32 {
         // for each of our inputs and outputs, copy the input buffer into the output buffer
         for index in 0..self.inputs.len() {
-            let i = self.inputs[index].get_read_buffer(nframes);
-            let o = self.outputs[index].get_write_buffer(nframes);
+            let i = self.inputs[index].get_read_buffer(nframes, ctx);
+            let o = self.outputs[index].get_write_buffer(nframes, ctx);
             o.clone_from_slice(i);
         }
+
 
         // return 0 so jack lets us keep running
         0
