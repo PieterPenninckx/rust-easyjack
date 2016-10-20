@@ -17,9 +17,8 @@ pub struct Client<'a> {
 
     // store the handlers in a box so that we can store a trait object + take ownership
     // I do not like boxing everything up because it causes unnecessary heap allocation :(
-    process_handler:   Option<Box<ProcessHandler + 'a>>,
-    port_conn_handler: Option<Box<PortConnectHandler + 'a>>,
-    srate_handler:     Option<Box<SampleRateHandler + 'a>>,
+    process_handler:  Option<Box<ProcessHandler + 'a>>,
+    metadata_handler: Option<Box<MetadataHandler + 'a>>
 }
 
 impl<'a> Client<'a> {
@@ -48,8 +47,7 @@ impl<'a> Client<'a> {
             Ok(Client {
                 c_client:          cl,
                 process_handler:   None,
-                port_conn_handler: None,
-                srate_handler:     None
+                metadata_handler:  None,
             })
         }
     }
@@ -84,8 +82,7 @@ impl<'a> Client<'a> {
             Ok(Client {
                 c_client:          cl,
                 process_handler:   None,
-                port_conn_handler: None,
-                srate_handler:     None
+                metadata_handler:  None,
             })
         }
 
@@ -306,11 +303,10 @@ impl<'a> Client<'a> {
     }
 
     /// Set the client's sample rate change handler.
-    pub fn set_sample_rate_handler<T: SampleRateHandler+ 'a>(&mut self, handler: T)
+    pub fn set_metadata_handler<T: MetadataHandler + 'a>(&mut self, handler: T)
         -> Result<(), status::Status>
     {
-        // see set_process_handler for details on the implementation
-        extern "C" fn callback<T: SampleRateHandler>(
+        extern "C" fn srate_callback<T: MetadataHandler>(
             srate: NumFrames,
             args: *mut libc::c_void) -> i32
         {
@@ -319,41 +315,7 @@ impl<'a> Client<'a> {
             unsafe { (*this).sample_rate_changed(srate) }
         }
 
-        // create a box for this handler
-        // this will allocate memory and move the object to the allocated memory on the heap
-        let b = Box::new(handler);
-
-        // get the pointer, this consumes the box, but does not move the
-        // resulting memory anywhere
-        let ptr = Box::into_raw(b);
-
-        let ret = unsafe {
-            let ptr = ptr as *mut libc::c_void;
-            jack_sys::jack_set_sample_rate_callback(self.c_client, Some(callback::<T>), ptr)
-        };
-
-        if ret != 0 {
-            // again, no error code provided
-            Err(status::FAILURE)
-        } else {
-            // create a box from the raw pointer. this does not allocate more memory
-            let b = unsafe { Box::from_raw(ptr) };
-            self.srate_handler = Some(b);
-            Ok(())
-        }
-    }
-
-    /// Set the client's port connection callback handler.
-    /// The client takes ownership of the handler, so be sure to set up any
-    /// messaging queues before passing the handler off to the client
-    /// See the docs for the `PortConnectHandler` struct for more details
-    /// TODO explain why I've eschewed reliance on jack's immutability and am
-    /// forcing the use of queues and whatnot
-    pub fn set_port_connection_handler<T: PortConnectHandler + 'a>(&mut self, handler: T)
-        -> Result<(), status::Status>
-    {
-        // see set_process_handler for details on the implementation
-        extern "C" fn callback<T: PortConnectHandler>(
+        extern "C" fn connect_callback<T: MetadataHandler>(
             a: jack_sys::jack_port_id_t,
             b: jack_sys::jack_port_id_t,
             connect: libc::c_int,
@@ -366,20 +328,45 @@ impl<'a> Client<'a> {
                 PortConnectStatus::PortsConnected
             };
 
-            unsafe { (*this).on_connect(a, b, status) }
+            unsafe { (*this).on_port_connect(a, b, status) }
         }
 
-        // create a box for this handler
-        // this will allocate memory and move the object to the allocated memory on the heap
         let b = Box::new(handler);
+        let cbs = b.callbacks_of_interest();
 
-        // get the pointer, this consumes the box, but does not move the
-        // resulting memory anywhere
         let ptr = Box::into_raw(b);
 
         let ret = unsafe {
             let ptr = ptr as *mut libc::c_void;
-            jack_sys::jack_set_port_connect_callback(self.c_client, Some(callback::<T>), ptr)
+
+            let mut ret = 0;
+            for h in cbs {
+                ret = match h {
+                    MetadataHandlers::SampleRate =>
+                        jack_sys::jack_set_sample_rate_callback(
+                            self.c_client, Some(srate_callback::<T>), ptr),
+
+                    MetadataHandlers::PortConnect =>
+                        jack_sys::jack_set_port_connect_callback(
+                            self.c_client, Some(connect_callback::<T>), ptr),
+
+                    // MetadataHandlers::Shutdown
+                    // MetadataHandlers::Freewheel,
+                    // MetadataHandlers::BufferSize,
+                    // MetadataHandlers::ClientRegistration,
+                    // MetadataHandlers::PortRegistration,
+                    // MetadataHandlers::PortRename,
+                    // MetadataHandlers::GraphOrder,
+                    // MetadataHandlers::Xrun,
+                    _           => unimplemented!(),
+                };
+
+                if ret != 0 {
+                    break;
+                }
+            }
+
+            ret
         };
 
         if ret != 0 {
@@ -388,7 +375,7 @@ impl<'a> Client<'a> {
         } else {
             // create a box from the raw pointer. this does not allocate more memory
             let b = unsafe { Box::from_raw(ptr) };
-            self.port_conn_handler = Some(b);
+            self.metadata_handler = Some(b);
             Ok(())
         }
     }

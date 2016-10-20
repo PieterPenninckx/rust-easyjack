@@ -54,7 +54,7 @@ impl<'a> Connector<'a> {
 
         // create an instance of the Connector, then set up the handler
         let mut conn = Connector { client: client, incoming: rx };
-        conn.client.set_port_connection_handler(handler).unwrap();
+        conn.client.set_metadata_handler(handler).unwrap();
 
         Ok(conn)
     }
@@ -92,13 +92,17 @@ struct ConnectorHandler {
     outgoing: Sender<(jack::PortId, jack::PortId, jack::PortConnectStatus)>
 }
 
-impl jack::PortConnectHandler for ConnectorHandler {
-    fn on_connect(&mut self, a: jack::PortId, b: jack::PortId, status: jack::PortConnectStatus) {
+impl jack::MetadataHandler for ConnectorHandler {
+    fn on_port_connect(&mut self, a: jack::PortId, b: jack::PortId, status: jack::PortConnectStatus) {
         // a connection happened, this is probably the connection we made
         // if not, that's a shame, we don't handle this case
         // send a message to the channel so that the main thread knows it is
         // safe to shutdown
         self.outgoing.send( (a, b, status) ).unwrap();
+    }
+
+    fn callbacks_of_interest(&self) -> Vec<jack::MetadataHandlers> {
+        vec![jack::MetadataHandlers::PortConnect]
     }
 }
 

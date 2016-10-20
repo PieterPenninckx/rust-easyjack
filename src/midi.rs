@@ -70,7 +70,6 @@ pub struct MidiEventRef<'a> {
 impl<'a> MidiEventRef<'a> {
     #[doc(hidden)]
     pub unsafe fn new(jackstruct: jack_sys::Struct__jack_midi_event) -> Self {
-        println!("time = {}", jackstruct.time);
         assert!(!jackstruct.buffer.is_null());
 
         // its easier to access everything if we pull all of the data out of the struct and store

@@ -30,7 +30,7 @@ impl MetadataHandler {
     }
 }
 
-impl jack::SampleRateHandler for MetadataHandler {
+impl jack::MetadataHandler for MetadataHandler {
     fn sample_rate_changed(&mut self, srate: jack::NumFrames) -> i32 {
         println!("updating sample rate: {}", srate);
 
@@ -39,6 +39,10 @@ impl jack::SampleRateHandler for MetadataHandler {
             Ok(_) => 0,
             Err(_) => 0
         }
+    }
+
+    fn callbacks_of_interest(&self) -> Vec<jack::MetadataHandlers> {
+        vec![jack::MetadataHandlers::SampleRate]
     }
 }
 
@@ -167,7 +171,7 @@ fn main() {
     c.set_process_handler(handler).unwrap();
 
     let handler = MetadataHandler::new(tx);
-    c.set_sample_rate_handler(handler).unwrap();
+    c.set_metadata_handler(handler).unwrap();
 
     c.activate().unwrap();
 

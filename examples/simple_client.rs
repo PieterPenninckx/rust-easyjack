@@ -68,10 +68,10 @@ impl AudioHandler {
 
 /// implement the `ProcessHandler` for the `AudioHandler`
 impl jack::ProcessHandler for AudioHandler {
-    fn process(&mut self, nframes: jack::NumFrames) -> i32 {
+    fn process(&mut self, ctx: &jack::CallbackContext, nframes: jack::NumFrames) -> i32 {
         // get the ports
-        let right = self.right_output.get_write_buffer(nframes);
-        let left  = self.left_output.get_write_buffer(nframes);
+        let right = self.right_output.get_write_buffer(nframes, ctx);
+        let left  = self.left_output.get_write_buffer(nframes, ctx);
 
         // for every frame, write our current progress
         for i in 0..(nframes as usize) {
