@@ -42,8 +42,8 @@ impl<'a> Connector<'a> {
         };
 
         let client = match client {
-            Ok(cl)    => cl,
-            Err(code) => return Err(code)
+            Ok((cl, _)) => cl,
+            Err(code)   => return Err(code)
         };
 
         // create our channel to communicate with the handler

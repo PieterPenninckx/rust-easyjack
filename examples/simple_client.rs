@@ -112,8 +112,8 @@ impl<'a> SimpleClient<'a> {
     fn new() -> Result<Self, jack::status::Status> {
         let client = jack::Client::open("simple", jack::options::NO_START_SERVER);
         let mut client = match client {
-            Ok(client) => client,
-            Err(code)  => return Err(code),
+            Ok((client, _)) => client,
+            Err(code)       => return Err(code),
         };
 
         // get some ports

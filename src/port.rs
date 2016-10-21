@@ -66,6 +66,7 @@ pub trait Port {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct UnknownPortHandle {
     c_port: Jackptr
 }

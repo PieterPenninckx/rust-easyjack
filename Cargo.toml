@@ -2,8 +2,9 @@
 name = "easyjack"
 version = "0.0.1"
 authors = ["David Zmick <dpzmick@gmail.com>"]
-description = "Easym rusty, bindings for the jack api"
+description = "Easy, rusty, bindings for the jack api"
 license = "MIT"
+build = "build.rs"
 
 [dependencies]
 bitflags = "0.7"

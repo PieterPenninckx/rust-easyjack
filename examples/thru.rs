@@ -59,7 +59,9 @@ fn main() {
     // set our global atomic to true
     RUNNING.store(true, atomic::Ordering::SeqCst);
 
-    let mut jack_client = jack::Client::open("testclient", jack::options::NO_START_SERVER).unwrap();
+    let mut jack_client =
+        jack::Client::open("testclient", jack::options::NO_START_SERVER).unwrap().0;
+
     println!("client created named: {}", jack_client.get_name());
 
     // 2 in, 2 out

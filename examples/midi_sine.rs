@@ -108,7 +108,6 @@ impl jack::ProcessHandler for AudioHandler {
 
                 println!("evi={} evt={}, i={}", event_index, event.get_jack_time(), i);
                 if event.get_jack_time() == i as jack::NumFrames {
-                    println!("got the frame");
                     let buf = event.raw_midi_bytes();
 
                     if buf[0] & 0x90 == 0x90 {
@@ -161,7 +160,7 @@ fn main() {
     RUNNING.store(true, atomic::Ordering::SeqCst);
 
 
-    let mut c = jack::Client::open("midi_sine", jack::options::NO_START_SERVER).unwrap();
+    let mut c = jack::Client::open("midi_sine", jack::options::NO_START_SERVER).unwrap().0;
     let i = c.register_input_midi_port("midi_in").unwrap();
     let o = c.register_output_audio_port("audio_out").unwrap();
 
