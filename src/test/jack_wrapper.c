@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include <jack/jack.h>
 
@@ -11,12 +12,14 @@ __thread jack_client_t* jco_ret = NULL;
 __thread jack_status_t  jco_ret_status;
 
 __thread char*          jco_passed_client_name = NULL;
+__thread char*          jco_passed_server_name = NULL;
 __thread jack_options_t jco_passed_options;
 __thread size_t         jco_num_calls;
 
 void jco_set_return(jack_client_t* ptrval) { jco_ret = ptrval; }
 void jco_set_status_return(jack_status_t stat) { jco_ret_status = stat; }
 char* jco_get_passed_client_name() { return jco_passed_client_name; }
+char* jco_get_passed_server_name() { return jco_passed_server_name; }
 jack_options_t jco_get_passed_options() { return jco_passed_options; }
 size_t jco_get_num_calls() { return jco_num_calls; }
 
@@ -34,6 +37,21 @@ jack_client_t* jack_client_open (
 
   strcpy(jco_passed_client_name, client_name);
 
+  va_list ap;
+  va_start(ap, status);
+  if (options & JackServerName) {
+    // we should be expecting an arg, I guess we just explode if we didn't get
+    // one?
+    char* server_name = va_arg(ap, char*);
+    assert(server_name); // maybe this will help sometimes
+
+    free(jco_passed_server_name);
+    jco_passed_server_name = malloc(strlen(server_name) + 1);
+    assert(jco_passed_server_name);
+    strcpy(jco_passed_server_name, server_name);
+  }
+  va_end(ap);
+
   jco_passed_options = options;
 
   *status = jco_ret_status;
@@ -50,11 +68,13 @@ void jco_setup() {
 }
 
 void jco_cleanup() {
-  free(jco_passed_client_name);
   jco_ret = NULL;
   jco_ret_status = 0;
 
+  free(jco_passed_client_name);
   jco_passed_client_name = NULL;
+  free(jco_passed_server_name);
+  jco_passed_server_name = NULL;
   jco_passed_options     = JackNullOption;
   jco_num_calls          = 0;
 }

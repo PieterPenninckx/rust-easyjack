@@ -21,26 +21,11 @@ pub struct Client<'a> {
 }
 
 impl<'a> Client<'a> {
-    /// Creates a new client and connects it to the default jack server. The
-    /// client will use the name given. If the name is not unique, the behavior
-    /// depends on the options provided via `opts`.
-    ///
-    /// If the option to force a unique name is given (USE_EXACT_NAME) and the exact name can not
-    /// be given, Err will be returned. Otherwise Returns the client and the name assigned to the
-    /// client.
-    ///
-    /// TODO client_name_size details in docs and in code
-    pub fn open(name: &str, opts: options::Options) -> Result<(Self, String), status::Status> {
-        // TODO does jack check if the options are valid?
-        let cstr = CString::new(name).unwrap();
-        let mut status = 0 as jack_sys::jack_status_t;
-        let statusptr = &mut status as *mut jack_sys::jack_status_t;
-
-        let cl = unsafe { jack_sys::jack_client_open(cstr.as_ptr(), opts.bits(), statusptr) };
-
+    fn open_helper(cl: *mut jack_sys::jack_client_t, status: u32, name: &str)
+        -> Result<(Self, String), status::Status>
+    {
         let status = status::Status::from_bits(status).unwrap();
         if cl.is_null() {
-            // if this fails, we are accepting a potential panic
             Err(status)
         } else {
             let cl = Client {
@@ -59,17 +44,38 @@ impl<'a> Client<'a> {
         }
     }
 
-    /// TODO document this
+    /// Creates a new client and connects it to the default jack server. The
+    /// client will use the name given. If the name is not unique, the behavior
+    /// depends on the options provided via `opts`.
+    ///
+    /// If the option to force a unique name is given (USE_EXACT_NAME) and the exact name can not
+    /// be given, Err will be returned. Otherwise Returns the client and the name assigned to the
+    /// client.
+    ///
+    /// TODO client_name_size details in docs and in code
+    pub fn open(name: &str, opts: options::Options) -> Result<(Self, String), status::Status> {
+        // TODO does jack check if the options are valid?
+        // TODO does jack check if the name is too large?
+
+        let cstr       = CString::new(name).unwrap();
+        let mut status = 0 as jack_sys::jack_status_t;
+        let statusptr  = &mut status as *mut jack_sys::jack_status_t;
+
+        let cl = unsafe { jack_sys::jack_client_open(cstr.as_ptr(), opts.bits(), statusptr) };
+        Client::open_helper(cl, status, name)
+    }
+
+    /// Attempts to open a client connecting to a server with a specified name
     pub fn open_connection_to(
         clientname: &str,
         servername: &str,
         opts: options::Options)
         -> Result<(Self, String), status::Status>
     {
-        let cstr = CString::new(clientname).unwrap();
-        let sstr = CString::new(servername).unwrap();
+        let cstr       = CString::new(clientname).unwrap();
+        let sstr       = CString::new(servername).unwrap();
         let mut status = 0 as jack_sys::jack_status_t;
-        let statusptr = &mut status as *mut jack_sys::jack_status_t;
+        let statusptr  = &mut status as *mut jack_sys::jack_status_t;
 
         let additionalopts = options::Options::from_bits(jack_sys::JackServerName).unwrap();
         let cl = unsafe {
@@ -80,21 +86,7 @@ impl<'a> Client<'a> {
                 sstr.as_ptr())
         };
 
-        if cl.is_null() {
-            // if this fails, we are accepting a potential panic
-            let status = status::Status::from_bits(status).unwrap();
-            Err(status)
-        } else {
-            // TODO check status anyway
-            let cl = Client {
-                c_client:          cl,
-                process_handler:   None,
-                metadata_handler:  None,
-            };
-
-            Ok( (cl, cstr.into_string().unwrap()) )
-        }
-
+        Client::open_helper(cl, status, clientname)
     }
 
     /// Returns the actual name of the client. This is useful when
@@ -444,6 +436,7 @@ mod test {
         pub fn jco_set_return(ptrval: *mut jack_sys::jack_client_t);
         pub fn jco_set_status_return(status: libc::c_uint);
         pub fn jco_get_passed_client_name() -> *const libc::c_char;
+        pub fn jco_get_passed_server_name() -> *const libc::c_char;
         pub fn jco_get_passed_options() -> libc::c_uint;
         pub fn jco_get_num_calls() -> libc::size_t;
         pub fn jco_setup();
@@ -457,34 +450,36 @@ mod test {
         pub fn jgcn_cleanup();
     }
 
+    struct JackClientOpen { }
+    impl JackClientOpen { pub fn setup() { unsafe { jco_setup(); } } }
+    impl Drop for JackClientOpen { fn drop(&mut self) { unsafe { jco_cleanup(); } } }
+
+    struct JackGetClientName { }
+    impl JackGetClientName { pub fn setup() { unsafe { jgcn_setup(); } } }
+    impl Drop for JackGetClientName { fn drop(&mut self) { unsafe { jgcn_cleanup(); } } }
+
     #[test]
     fn test_client_open_fail() {
-        unsafe { jco_setup(); jgcn_setup(); }
+        let _jco = JackClientOpen::setup();
 
         // test that open will fail if the jack method returns null
-        unsafe { jco_set_return(ptr::null_mut()) };
+        // checking only one case with status bits because these could be any number of things
+        // depending on the state of the server
+        unsafe {
+            jco_set_return(ptr::null_mut());
+            jco_set_status_return(status::INIT_FAILURE.bits());
+        };
 
         let client = Client::open("test", options::NO_START_SERVER);
-        let used_name = unsafe { CStr::from_ptr(jco_get_passed_client_name()) };
-
-        let opts = unsafe { jco_get_passed_options() };
-        let opts = options::Options::from_bits(opts);
-
-        assert!(used_name.to_str().unwrap() == "test");
         assert!(client.is_err());
-        assert!(opts.is_some());
-        assert!(opts.unwrap() == options::NO_START_SERVER);
+        assert!(client.err().unwrap() == status::INIT_FAILURE);
+
         assert!(unsafe { jco_get_num_calls() } == 1);
-
-        // should not attempt to call get_name (potentially expensive)
-        assert!(unsafe { jgcn_get_num_calls() } == 0);
-
-        unsafe { jco_cleanup(); jgcn_cleanup(); };
     }
 
     #[test]
     fn test_client_open_okay() {
-        unsafe { jco_setup(); jgcn_setup(); }
+        let (_co, _gn) = (JackClientOpen::setup(), JackGetClientName::setup());
 
         // test that open will succeed if the jack method returns a valid pointer
         let ptr = 0xdeadbeef as *mut jack_sys::jack_client_t;
@@ -500,18 +495,22 @@ mod test {
         assert!(client.is_ok());
         assert!(opts.is_some());
         assert!(opts.unwrap() == options::NO_START_SERVER);
-        assert!(unsafe { client.unwrap().0.get_raw() } == ptr);
-        assert!(unsafe { jco_get_num_calls() } == 1);
 
-        // should not attempt to call get_name (potentially expensive)
-        assert!(unsafe { jgcn_get_num_calls() } == 0);
+        let server_name = unsafe { jco_get_passed_server_name() };
+        assert!(server_name.is_null());
 
-        unsafe { jco_cleanup(); jgcn_cleanup(); };
+        unsafe {
+            assert!(client.unwrap().0.get_raw() == ptr);
+            assert!(jco_get_num_calls() == 1);
+
+            // should not attempt to call get_name (potentially expensive)
+            assert!(jgcn_get_num_calls() == 0);
+        }
     }
 
     #[test]
     fn test_client_name_not_unique_succ() {
-        unsafe { jco_setup(); jgcn_setup(); }
+        let (_co, _gn) = (JackClientOpen::setup(), JackGetClientName::setup());
 
         let ptr = 0xdeadbeef as *mut jack_sys::jack_client_t;
         unsafe {
@@ -531,7 +530,6 @@ mod test {
         assert!(unsafe { jgcn_get_passed_client() } == ptr);
 
         assert!(client.is_ok());
-
         let client = client.unwrap();
         assert!(unsafe { client.0.get_raw() } == ptr);
         assert!(client.1 == "notunique.1");
@@ -541,32 +539,76 @@ mod test {
         assert!(opts.is_some());
         assert!(opts.unwrap() == options::NO_START_SERVER);
 
-        assert!(unsafe { jco_get_num_calls() } == 1);
-        assert!(unsafe { jgcn_get_num_calls() } == 1);
-
-        unsafe { jco_cleanup(); jgcn_cleanup(); };
+        unsafe {
+            assert!(jco_get_num_calls() == 1);
+            assert!(jgcn_get_num_calls() == 1);
+        }
     }
 
     #[test]
     fn test_client_name_not_unique_fail() {
-        unsafe { jco_setup(); jgcn_setup(); }
+        let (_co, _gn) = (JackClientOpen::setup(), JackGetClientName::setup());
 
         unsafe {
-            jco_set_status_return(status::NAME_NOT_UNIQUE.bits()); // ????
+            jco_set_status_return(status::NAME_NOT_UNIQUE.bits()); // TODO verify the return
             jco_set_return(ptr::null_mut());
         };
 
         let client = Client::open("notunique",
                                   options::NO_START_SERVER & options::USE_EXACT_NAME);
+        assert!(client.is_err());
 
         let used_name = unsafe { CStr::from_ptr(jco_get_passed_client_name()) };
         assert!(used_name.to_str().unwrap() == "notunique");
 
+        unsafe {
+            assert!(jco_get_num_calls() == 1);
+            assert!(jgcn_get_num_calls() == 0);
+        }
+    }
+
+    #[test]
+    fn open_connection_to_named_server_okay() {
+        let _jco = JackClientOpen::setup();
+
+        // test that open will succeed if the jack method returns a valid pointer
+        let ptr = 0xdeadbeef as *mut jack_sys::jack_client_t;
+        unsafe { jco_set_return(ptr) };
+
+        let client = Client::open_connection_to("client", "server", options::NO_START_SERVER);
+        let used_client_name = unsafe { CStr::from_ptr(jco_get_passed_client_name()) };
+        let used_server_name = unsafe { CStr::from_ptr(jco_get_passed_server_name()) };
+
+        assert!(client.is_ok());
+        assert!(used_client_name.to_str().unwrap() == "client");
+        assert!(used_server_name.to_str().unwrap() == "server");
+
+        let opts = unsafe { jco_get_passed_options() };
+        let opts = options::Options::from_bits(opts);
+        assert!(opts.is_some());
+        assert!(opts.unwrap() == options::NO_START_SERVER | options::SERVER_NAME);
+
+        unsafe {
+            assert!(client.unwrap().0.get_raw() == ptr);
+            assert!(jco_get_num_calls() == 1);
+        }
+    }
+
+    #[test]
+    fn open_connection_to_named_server_fail() {
+        let _jco = JackClientOpen::setup();
+
+        // only testing that this method returns an error when the function returns a null
+        // checking only one case with status bits, these could be any number of things
+        unsafe {
+            jco_set_return(ptr::null_mut());
+            jco_set_status_return(status::INIT_FAILURE.bits());
+        };
+
+        let client = Client::open_connection_to("client", "server", options::NO_START_SERVER);
         assert!(client.is_err());
+        assert!(client.err().unwrap() == status::INIT_FAILURE);
 
         assert!(unsafe { jco_get_num_calls() } == 1);
-        assert!(unsafe { jgcn_get_num_calls() } == 0);
-
-        unsafe { jco_cleanup(); jgcn_cleanup(); };
     }
 }
