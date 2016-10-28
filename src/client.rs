@@ -269,14 +269,14 @@ impl<'a> Client<'a> {
         // this function must be generic over <T>.
         // Trait pointers are "fat pointers" (not raw pointers), so we can't
         // pass trait pointers around via a C void*
-        extern "C" fn process_callback<T: ProcessHandler>(
+        unsafe extern "C" fn process_callback<T: ProcessHandler>(
             nframes: jack_sys::jack_nframes_t,
             args: *mut libc::c_void)
             -> libc::c_int
         {
             let this = args as *mut T;
             let ctx = CallbackContext::new();
-            unsafe { (*this).process(&ctx, nframes) }
+            (*this).process(&ctx, nframes)
         }
 
         // create a box for this handler
@@ -309,16 +309,16 @@ impl<'a> Client<'a> {
     pub fn set_metadata_handler<T: MetadataHandler + 'a>(&mut self, handler: T)
         -> Result<(), status::Status>
     {
-        extern "C" fn srate_callback<T: MetadataHandler>(
+        unsafe extern "C" fn srate_callback<T: MetadataHandler>(
             srate: NumFrames,
             args: *mut libc::c_void) -> i32
         {
             let this = args as *mut T;
 
-            unsafe { (*this).sample_rate_changed(srate) }
+            (*this).sample_rate_changed(srate)
         }
 
-        extern "C" fn connect_callback<T: MetadataHandler>(
+        unsafe extern "C" fn connect_callback<T: MetadataHandler>(
             a: jack_sys::jack_port_id_t,
             b: jack_sys::jack_port_id_t,
             connect: libc::c_int,
@@ -331,7 +331,7 @@ impl<'a> Client<'a> {
                 PortConnectStatus::PortsConnected
             };
 
-            unsafe { (*this).on_port_connect(a, b, status) }
+            (*this).on_port_connect(a, b, status)
         }
 
         let b = Box::new(handler);
